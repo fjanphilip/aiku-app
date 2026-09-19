@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# agent skills and local tool assets
+.agents/
+.claude/
+skills-lock.json
+stitch-assets/
