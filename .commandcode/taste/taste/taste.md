@@ -1,0 +1,14 @@
+# Taste
+- Prefers installing Python CLI tools with `uv` (`uv tool install <pkg>`) rather than pip/pipx. Confidence: 0.6
+- Prefers responses in Indonesian (Bahasa Indonesia), with English kept for technical/tool names. Confidence: 0.6
+- Likes to discuss approach and tradeoffs (asks "apa menurutmu?" / "saya ingin berdiskusi") before or alongside fixes — wants the reasoning/mental model and platform-level caveats explained, not just a patch. Confidence: 0.45
+- Writes long, structured spec prompts (numbered requirements, explicit state types, folder paths, scope limits) and expects each item to be honored literally. Confidence: 0.6
+- Explicitly scopes the work: no features beyond the given list, and raise clarifying questions instead of guessing when a requirement is ambiguous. Confidence: 0.6
+- Wants a short plan/approach explained before any code is written, then staged implementation, and an explicit list of files created/changed at the end. Confidence: 0.55
+- Expects manual test scenarios (covering happy path, failures, cancellation) as part of the deliverable so the change can be verified by hand. Confidence: 0.5
+- Likes receiving a self-contained single-file HTML preview/mockup (no CDN, placed in the project) to visualize a UI/design before it gets implemented in the app. Confidence: 0.5
+- Wants a UI preview ported into the real app as fully working code, not visual-only: when a design shows features the app lacks, prefers building the real data layer (schema/CRUD) over static placeholders, and drops decorative elements (profile card, upgrade button, tools button) rather than faking data for them. Confidence: 0.55
+- Keeps AI features mobile-only: the app calls the provider (e.g. OpenRouter) directly using a user-supplied BYOK API key stored on-device, instead of routing requests through a backend/proxy layer. Confidence: 0.55
+- Prefers minimal changes to existing working features and schema: leave already-working parts (BYOK flow, model picker, SQLite schema) untouched unless the change is strictly necessary. Confidence: 0.55
+- Wants generated/tool-output directories (e.g. `graphify-out/`, `.agents/`, local tool assets) kept out of version control and build uploads via `.gitignore`. Confidence: 0.45
+- Expects side housekeeping to be bundled into the same pass as the main task ("jalankan sekalian …") instead of being deferred to a separate round. Confidence: 0.4

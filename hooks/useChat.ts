@@ -1,22 +1,29 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { nineRouterClient } from '../services/nineRouterClient';
 import { getStoredData } from '../services/storage';
 import {
   initHistoryDatabase,
   createNewSession,
   saveMessage,
-  updateSessionMessageCount,
   getMessagesForSession,
 } from '../services/history';
 import { ChatMessage } from '../types/chat';
+import { ModelCapabilities, RunState, WireMessage } from '../types/aiRun';
+import { useAiRun } from './useAiRun';
 
 export interface UseChatResult {
   messages: ChatMessage[];
   inputValue: string;
   setInputValue: (value: string) => void;
-  isLoading: boolean;
-  sendMessage: (content: string) => Promise<void>;
-  abort: () => void;
+  /** Ada satu run AI yang sedang berjalan. */
+  isRunning: boolean;
+  /** Sumber kebenaran semua indikator status. */
+  runState: RunState;
+  /** Teks jawaban yang sedang mengalir, hanya hidup selama run aktif. */
+  streamingText: string;
+  sendMessage: (content: string, capabilities: ModelCapabilities) => Promise<void>;
+  stop: () => void;
+  retry: (capabilities: ModelCapabilities) => Promise<void>;
+  dismissError: () => void;
   sessionId: string | null;
   sessionTitle: string | null;
   setSessionId: (id: string | null) => void;
@@ -33,13 +40,21 @@ const generateId = (): string => {
 export const useChat = (): UseChatResult => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   const [activeModel, setActiveModel] = useState<string | null>(null);
 
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const assistantResponseRef = useRef<string>('');
+  const {
+    runState,
+    streamingText,
+    isRunning,
+    send: sendRun,
+    stop: stopRun,
+    clearError,
+  } = useAiRun();
+
+  const sessionIdRef = useRef<string | null>(null);
+  const runningRef = useRef(false);
 
   const refreshActiveModel = useCallback(async () => {
     try {
@@ -50,7 +65,6 @@ export const useChat = (): UseChatResult => {
     }
   }, []);
 
-  // Muat preferensi model saat hook dimuat
   useEffect(() => {
     initHistoryDatabase().catch((err) => {
       console.warn('Inisialisasi database awal ditunda:', err);
@@ -63,26 +77,82 @@ export const useChat = (): UseChatResult => {
       const dbMessages = await getMessagesForSession(targetSessionId);
       setMessages(dbMessages);
       setSessionId(targetSessionId);
+      sessionIdRef.current = targetSessionId;
     } catch (err) {
       console.error('Gagal memuat sesi chat:', err);
     }
   }, []);
 
   const startNewChat = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
+    stopRun();
+    runningRef.current = false;
     setMessages([]);
     setSessionId(null);
+    sessionIdRef.current = null;
     setSessionTitle(null);
     setInputValue('');
-    setIsLoading(false);
-  }, []);
+  }, [stopRun]);
 
-  const sendMessage = async (content: string) => {
+  /** Menjalankan satu run AI untuk percakapan yang diberikan. */
+  const runConversation = async (
+    history: ChatMessage[],
+    targetSessionId: string,
+    capabilities: ModelCapabilities
+  ): Promise<void> => {
+    const stored = await getStoredData();
+    const { baseUrl, apiKey, defaultModel, systemPrompt } = stored;
+
+    if (!baseUrl || !apiKey) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: generateId(),
+          role: 'assistant',
+          content:
+            'Base URL atau API Key belum dikonfigurasi. Silakan atur terlebih dahulu di Pengaturan.',
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      return;
+    }
+
+    const wireHistory: WireMessage[] = history.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+
+    try {
+      await sendRun({
+        baseUrl,
+        apiKey,
+        model: defaultModel || 'gemini-2.0-flash',
+        systemPrompt,
+        history: wireHistory,
+        sessionId: targetSessionId,
+        supportsTools: capabilities.supportsTools,
+        supportsReasoning: capabilities.supportsReasoning,
+      });
+    } finally {
+      // Muat ulang dari SQLite supaya keadaan idle benar-benar sama
+      // dengan isi database (pesan final asisten sudah tersimpan di sana).
+      try {
+        const dbMessages = await getMessagesForSession(targetSessionId);
+        setMessages(dbMessages);
+      } catch (err) {
+        console.error('Gagal memuat ulang sesi setelah run:', err);
+      }
+    }
+  };
+
+  const sendMessage = async (
+    content: string,
+    capabilities: ModelCapabilities
+  ): Promise<void> => {
     const trimmedContent = content.trim();
-    if (!trimmedContent || isLoading) return;
+    // Hanya satu run aktif per percakapan.
+    if (!trimmedContent || runningRef.current) return;
+
+    runningRef.current = true;
 
     const userMessage: ChatMessage = {
       id: generateId(),
@@ -91,170 +161,79 @@ export const useChat = (): UseChatResult => {
       createdAt: new Date().toISOString(),
     };
 
-    // Tambahkan user message ke state dan kosongkan input field
-    setMessages((prev) => [...prev, userMessage]);
+    const history = [...messages, userMessage];
+    setMessages(history);
     setInputValue('');
-    setIsLoading(true);
-
-    abortControllerRef.current = new AbortController();
-    const ac = abortControllerRef.current;
-    assistantResponseRef.current = '';
-
-    // Ambil konfigurasi dari SecureStore via services/storage
-    const stored = await getStoredData();
-    const { baseUrl, apiKey, defaultModel, systemPrompt } = stored;
-
-    if (!baseUrl || !apiKey) {
-      setIsLoading(false);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: generateId(),
-          role: 'assistant',
-          content: 'Base URL atau API Key 9Router belum dikonfigurasi. Silakan atur terlebih dahulu di tab **Pengaturan**.',
-          createdAt: new Date().toISOString(),
-        },
-      ]);
-      return;
-    }
 
     try {
-      let currentSessionId = sessionId;
+      let currentSessionId = sessionIdRef.current;
 
-      // Jika belum ada sesi aktif, buat sesi baru di SQLite
       if (!currentSessionId) {
         try {
           const newSession = await createNewSession(trimmedContent);
           currentSessionId = newSession.id;
-          setSessionId(currentSessionId);
           setSessionTitle(newSession.title);
         } catch (dbErr) {
-          console.error('Gagal membuat sesi di SQLite (melanjutkan dengan session memory):', dbErr);
+          console.error('Gagal membuat sesi di SQLite:', dbErr);
           currentSessionId = generateId();
-          setSessionId(currentSessionId);
         }
+        setSessionId(currentSessionId);
+        sessionIdRef.current = currentSessionId;
       }
 
-      // Simpan user message ke database
+      // Pesan user disimpan SEBELUM request dikirim.
       try {
         await saveMessage(currentSessionId, 'user', trimmedContent);
       } catch (dbErr) {
         console.error('Gagal menyimpan pesan user ke SQLite:', dbErr);
       }
 
-      const conversationHistory = [...messages, userMessage];
-      const assistantMessageId = generateId();
-
-      await nineRouterClient.chatStream({
-        baseUrl,
-        apiKey,
-        model: defaultModel || 'gemini-2.0-flash',
-        systemPrompt,
-        messages: conversationHistory,
-        signal: ac.signal,
-        onToken: (tokenContent: string) => {
-          assistantResponseRef.current += tokenContent;
-
-          // Update state secara immutable sehingga React 19 memicu re-render
-          setMessages((prev) => {
-            const lastIndex = prev.length - 1;
-            if (lastIndex >= 0 && prev[lastIndex].id === assistantMessageId) {
-              const updated = [...prev];
-              updated[lastIndex] = {
-                ...updated[lastIndex],
-                content: assistantResponseRef.current,
-              };
-              return updated;
-            } else {
-              return [
-                ...prev,
-                {
-                  id: assistantMessageId,
-                  role: 'assistant',
-                  content: assistantResponseRef.current,
-                  createdAt: new Date().toISOString(),
-                },
-              ];
-            }
-          });
-        },
-        onError: (errorMessage: string) => {
-          setIsLoading(false);
-          // Jika sudah ada respons sebagian, tambahkan catatan error di bawahnya
-          if (assistantResponseRef.current) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: generateId(),
-                role: 'assistant',
-                content: `\n\n*[Error: ${errorMessage}]*`,
-                createdAt: new Date().toISOString(),
-              },
-            ]);
-          } else {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: generateId(),
-                role: 'assistant',
-                content: `[Error] ${errorMessage}`,
-                createdAt: new Date().toISOString(),
-              },
-            ]);
-          }
-        },
-        onComplete: async () => {
-          setIsLoading(false);
-          const fullResponse = assistantResponseRef.current;
-          // SIMPAN BALASAN ASISTEN KE DATABASE SQLITE
-          if (currentSessionId && fullResponse.trim()) {
-            try {
-              await saveMessage(currentSessionId, 'assistant', fullResponse);
-              await updateSessionMessageCount(currentSessionId);
-            } catch (dbErr) {
-              console.error('Gagal menyimpan balasan asisten ke SQLite:', dbErr);
-            }
-          }
-        },
-      });
-    } catch (err: unknown) {
-      setIsLoading(false);
-      const errMsg = err instanceof Error ? err.message : 'Terjadi kesalahan tidak terduga';
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: generateId(),
-          role: 'assistant',
-          content: `[Error] ${errMsg}`,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      await runConversation(history, currentSessionId, capabilities);
+    } finally {
+      runningRef.current = false;
     }
   };
 
-  const abort = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-      setIsLoading(false);
+  /** Mengulang permintaan terakhir tanpa menambah pesan user baru. */
+  const retry = async (capabilities: ModelCapabilities): Promise<void> => {
+    const targetSessionId = sessionIdRef.current;
+    if (!targetSessionId || runningRef.current) return;
+    if (!messages.some((message) => message.role === 'user')) return;
+
+    runningRef.current = true;
+    clearError();
+
+    // Buang balasan gagal terakhir agar tidak ikut jadi konteks.
+    const lastIndex = messages.length - 1;
+    const history =
+      lastIndex >= 0 &&
+      messages[lastIndex].role === 'assistant' &&
+      messages[lastIndex].status === 'error'
+        ? messages.slice(0, lastIndex)
+        : messages;
+
+    try {
+      await runConversation(history, targetSessionId, capabilities);
+    } finally {
+      runningRef.current = false;
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
+  const stop = useCallback(() => {
+    stopRun();
+  }, [stopRun]);
 
   return {
     messages,
     inputValue,
     setInputValue,
-    isLoading,
+    isRunning,
+    runState,
+    streamingText,
     sendMessage,
-    abort,
+    stop,
+    retry,
+    dismissError: clearError,
     sessionId,
     sessionTitle,
     setSessionId,

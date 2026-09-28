@@ -10,6 +10,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { initHistoryDatabase, getAllSessions, deleteSession } from '../../services/history';
+import { getAllProjects } from '../../services/projects';
 import { ChatSession } from '../../types/chat';
 import { COLORS } from '../../types/design';
 import {
@@ -19,6 +20,7 @@ import {
   HistoryGlyph,
   BackChevronGlyph,
   ChatGlyph,
+  FolderGlyph,
   PlusGlyph,
 } from '../../components/DesignSystem';
 
@@ -26,14 +28,21 @@ export default function HistoryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
 
   const loadSessions = useCallback(async () => {
     setIsLoading(true);
     try {
       await initHistoryDatabase();
-      const sessionsData = await getAllSessions();
+      const [sessionsData, projectsData] = await Promise.all([
+        getAllSessions(),
+        getAllProjects(),
+      ]);
       setSessions(sessionsData);
+      setProjectNames(
+        Object.fromEntries(projectsData.map((project) => [project.id, project.name]))
+      );
     } catch (err) {
       console.error('Gagal memuat riwayat sesi:', err);
     } finally {
@@ -92,7 +101,8 @@ export default function HistoryScreen() {
   };
 
   const renderSessionItem = ({ item }: { item: ChatSession }) => {
-    const formattedDate = formatDate(item.createdAt);
+    const formattedDate = formatDate(item.updatedAt);
+    const projectName = item.projectId ? projectNames[item.projectId] : undefined;
 
     return (
       <TouchableOpacity
@@ -116,6 +126,14 @@ export default function HistoryScreen() {
                 {item.messageCount || 0} pesan
               </Text>
             </View>
+            {projectName ? (
+              <View style={styles.projectPill}>
+                <FolderGlyph size={10} color={COLORS.textMuted} />
+                <Text style={styles.projectPillText} numberOfLines={1}>
+                  {projectName}
+                </Text>
+              </View>
+            ) : null}
             {formattedDate ? (
               <>
                 <Text style={styles.metaDot}>•</Text>
@@ -395,7 +413,24 @@ const styles = StyleSheet.create({
   sessionMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
+  },
+  projectPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: 140,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  projectPillText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+    flexShrink: 1,
   },
   messageCountPill: {
     backgroundColor: 'rgba(255, 199, 44, 0.12)',

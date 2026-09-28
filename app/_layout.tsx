@@ -1,24 +1,39 @@
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, ThemeProvider, DarkTheme, type Theme } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions, Easing } from 'react-native';
+import { View, Image, StyleSheet, Animated, Dimensions, Easing } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { getStoredData } from '../services/storage';
 import { COLORS } from '../types/design';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// expo-router memakai DefaultTheme (terang) selama app tidak menyediakan tema,
+// sehingga container screen berwarna rgb(242, 242, 242) dan terlihat sebagai
+// celah putih di atas keyboard. Semua permukaan navigasi diselaraskan ke token app.
+const AIKU_NAV_THEME: Theme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: COLORS.surfaceBase,
+    card: COLORS.surfaceBase,
+    border: COLORS.borderSubtle,
+    text: COLORS.textPrimary,
+    primary: COLORS.accentYellow,
+    notification: COLORS.accentYellow,
+  },
+};
+
 function RunningTextSplash({ onAnimationComplete }: { onAnimationComplete: () => void }) {
   const [translateX] = useState(() => new Animated.Value(-SCREEN_WIDTH * 0.5));
   const [opacity] = useState(() => new Animated.Value(0));
-  const [dotScale] = useState(() => new Animated.Value(1));
   const [lineScaleX] = useState(() => new Animated.Value(0));
   const [screenOpacity] = useState(() => new Animated.Value(1));
 
   useEffect(() => {
     // Alur Animasi:
-    // 1. Teks 'aiku' meluncur masuk dari kiri ke tengah layar
+    // 1. Logo Aiku meluncur masuk dari kiri ke tengah layar
     // 2. Berhenti tepat di tengah (translateX = 0)
-    // 3. Titik amber berdenyut halus & garis aksen di bawah melebar di tengah
+    // 3. Garis aksen di bawah logo melebar di tengah
     // 4. Diam sejenak di tengah agar terlihat jelas
     // 5. Fade out lembut ke antarmuka aplikasi
     Animated.sequence([
@@ -35,27 +50,13 @@ function RunningTextSplash({ onAnimationComplete }: { onAnimationComplete: () =>
           useNativeDriver: true,
         }),
       ]),
-      // Berhenti di tengah: titik amber berdenyut & garis aksen muncul
-      Animated.parallel([
-        Animated.sequence([
-          Animated.timing(dotScale, {
-            toValue: 1.4,
-            duration: 220,
-            useNativeDriver: true,
-          }),
-          Animated.timing(dotScale, {
-            toValue: 1,
-            duration: 220,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.timing(lineScaleX, {
-          toValue: 1,
-          duration: 350,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]),
+      // Berhenti di tengah: garis aksen muncul
+      Animated.timing(lineScaleX, {
+        toValue: 1,
+        duration: 350,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
       // Berhenti sejenak di tengah (pause)
       Animated.delay(550),
       // Fade out lembut
@@ -67,7 +68,7 @@ function RunningTextSplash({ onAnimationComplete }: { onAnimationComplete: () =>
     ]).start(() => {
       onAnimationComplete();
     });
-  }, [translateX, opacity, dotScale, lineScaleX, screenOpacity, onAnimationComplete]);
+  }, [translateX, opacity, lineScaleX, screenOpacity, onAnimationComplete]);
 
   return (
     <Animated.View style={[styles.splashContainer, { opacity: screenOpacity }]}>
@@ -82,14 +83,10 @@ function RunningTextSplash({ onAnimationComplete }: { onAnimationComplete: () =>
             },
           ]}
         >
-          <Text style={styles.aikuText}>aiku</Text>
-          <Animated.View
-            style={[
-              styles.amberDot,
-              {
-                transform: [{ scale: dotScale }],
-              },
-            ]}
+          <Image
+            source={require('../assets/splash-icon.png')}
+            style={styles.splashLogo}
+            resizeMode='contain'
           />
         </Animated.View>
         <Animated.View
@@ -148,21 +145,24 @@ export default function RootLayout() {
     }
   }, [isReady, isConfigured, router]);
 
-  if (!isReady) {
-    return (
-      <RunningTextSplash
-        onAnimationComplete={() => setIsAnimationFinished(true)}
-      />
-    );
-  }
-
   return (
-    <>
-      <StatusBar style='light' />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name='(tabs)' />
-      </Stack>
-    </>
+    <ThemeProvider value={AIKU_NAV_THEME}>
+      {isReady ? (
+        <>
+          <StatusBar style='light' />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: COLORS.surfaceBase },
+            }}
+          >
+            <Stack.Screen name='(tabs)' />
+          </Stack>
+        </>
+      ) : (
+        <RunningTextSplash onAnimationComplete={() => setIsAnimationFinished(true)} />
+      )}
+    </ThemeProvider>
   );
 }
 
@@ -178,30 +178,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   runningBox: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
   },
-  aikuText: {
-    fontSize: 36,
-    fontWeight: '700',
-    letterSpacing: 4,
-    color: COLORS.textPrimary,
-    textTransform: 'lowercase',
-  },
-  amberDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.accentYellow,
-    marginTop: 8,
+  splashLogo: {
+    width: 200,
+    height: 214,
   },
   subtleTrack: {
     width: 54,
     height: 2,
     borderRadius: 1,
     backgroundColor: COLORS.accentYellow,
-    marginTop: 10,
+    marginTop: 22,
     opacity: 0.7,
   },
 });

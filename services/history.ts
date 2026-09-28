@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
-import { ChatMessage, ChatSession, MessageRole } from '../types/chat';
+import { ChatMessage, ChatSession, MessageRole, MessageStatus } from '../types/chat';
 
 const DB_NAME = 'ai-chat.db';
 const isWeb = Platform.OS === 'web';
@@ -8,11 +8,18 @@ const WEB_SESSIONS_KEY = 'ai_chat_web_sessions';
 const WEB_MESSAGES_KEY = 'ai_chat_web_messages';
 
 // Helper storage web fallback
+const normalizeWebSession = (session: ChatSession): ChatSession => ({
+  ...session,
+  updatedAt: session.updatedAt ?? session.createdAt,
+  projectId: session.projectId ?? null,
+});
+
 const getWebSessions = (): ChatSession[] => {
   if (typeof window === 'undefined' || !window.localStorage) return [];
   try {
     const raw = window.localStorage.getItem(WEB_SESSIONS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? (JSON.parse(raw) as ChatSession[]) : [];
+    return parsed.map(normalizeWebSession);
   } catch {
     return [];
   }
@@ -46,6 +53,23 @@ let dbInitPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 // Antrean eksekusi sekuensial untuk mencegah race-condition di native layer Android
 let dbQueue: Promise<unknown> = Promise.resolve();
 
+/**
+ * Menambahkan kolom ke sebuah tabel hanya jika belum ada.
+ * Diperlukan agar database dari versi sebelumnya tetap kompatibel
+ * tanpa menghapus data pengguna.
+ */
+const ensureColumn = async (
+  db: SQLite.SQLiteDatabase,
+  table: string,
+  column: string,
+  definition: string
+): Promise<void> => {
+  const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (!columns.some((c) => c.name === column)) {
+    await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+};
+
 export const getDatabase = async (): Promise<SQLite.SQLiteDatabase> => {
   if (dbInstance) {
     return dbInstance;
@@ -63,7 +87,15 @@ export const getDatabase = async (): Promise<SQLite.SQLiteDatabase> => {
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            message_count INTEGER DEFAULT 0
+            updated_at TEXT,
+            message_count INTEGER DEFAULT 0,
+            project_id TEXT
+          );
+
+          CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL
           );
 
           CREATE TABLE IF NOT EXISTS messages (
@@ -72,11 +104,26 @@ export const getDatabase = async (): Promise<SQLite.SQLiteDatabase> => {
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            status TEXT,
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
           );
 
           CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
         `);
+
+        // Migrasi database lama: kolom baru ditambahkan hanya bila belum ada.
+        // Wajib berjalan SEBELUM index yang memakai kolom tersebut: pada database
+        // lama kolomnya belum ada, sehingga CREATE INDEX akan menggagalkan seluruh
+        // inisialisasi dan semua operasi database ikut error.
+        await ensureColumn(db, 'sessions', 'updated_at', 'TEXT');
+        await ensureColumn(db, 'sessions', 'project_id', 'TEXT');
+        await ensureColumn(db, 'messages', 'status', 'TEXT');
+
+        await db.execAsync(`
+          CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+          UPDATE sessions SET updated_at = created_at WHERE updated_at IS NULL;
+        `);
+
         dbInstance = db;
         return db;
       } catch (err) {
@@ -93,7 +140,9 @@ export const getDatabase = async (): Promise<SQLite.SQLiteDatabase> => {
  * Menjalankan operasi database dalam antrean sekuensial
  * agar tidak terjadi pemanggilan prepared statement secara paralel pada native Android.
  */
-const runInQueue = async <T>(operation: (db: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> => {
+export const runInQueue = async <T>(
+  operation: (db: SQLite.SQLiteDatabase) => Promise<T>
+): Promise<T> => {
   const db = await getDatabase();
   const execute = async () => {
     return await operation(db);
@@ -122,30 +171,38 @@ export const createNewSession = async (firstPrompt: string): Promise<ChatSession
 
   if (isWeb) {
     const sessions = getWebSessions();
-    const newSession: ChatSession = { id, title, createdAt, messageCount: 0 };
+    const newSession: ChatSession = {
+      id,
+      title,
+      createdAt,
+      updatedAt: createdAt,
+      messageCount: 0,
+      projectId: null,
+    };
     saveWebSessions([newSession, ...sessions]);
     return newSession;
   }
 
   await runInQueue(async (db) => {
     await db.runAsync(
-      'INSERT INTO sessions (id, title, created_at, message_count) VALUES (?, ?, ?, 0)',
+      'INSERT INTO sessions (id, title, created_at, updated_at, message_count, project_id) VALUES (?, ?, ?, ?, 0, NULL)',
       id,
       title,
+      createdAt,
       createdAt
     );
   });
 
-  return { id, title, createdAt, messageCount: 0 };
+  return { id, title, createdAt, updatedAt: createdAt, messageCount: 0, projectId: null };
 };
 
 export const getAllSessions = async (): Promise<ChatSession[]> => {
   if (isWeb) {
-    return getWebSessions();
+    return getWebSessions().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   }
   return await runInQueue(async (db) => {
     const sessions = await db.getAllAsync<ChatSession>(
-      'SELECT id, title, created_at AS createdAt, message_count AS messageCount FROM sessions ORDER BY created_at DESC'
+      'SELECT id, title, created_at AS createdAt, updated_at AS updatedAt, message_count AS messageCount, project_id AS projectId FROM sessions ORDER BY updated_at DESC'
     );
     return sessions;
   });
@@ -158,7 +215,7 @@ export const getMessagesForSession = async (sessionId: string): Promise<ChatMess
   }
   return await runInQueue(async (db) => {
     const messages = await db.getAllAsync<ChatMessage>(
-      'SELECT id, session_id AS sessionId, role, content, created_at AS createdAt FROM messages WHERE session_id = ? ORDER BY created_at ASC',
+      'SELECT id, session_id AS sessionId, role, content, created_at AS createdAt, status FROM messages WHERE session_id = ? ORDER BY created_at ASC',
       sessionId
     );
     return messages;
@@ -168,30 +225,114 @@ export const getMessagesForSession = async (sessionId: string): Promise<ChatMess
 export const saveMessage = async (
   sessionId: string,
   role: MessageRole,
-  content: string
+  content: string,
+  status?: MessageStatus
 ): Promise<string> => {
   const id = generateId();
   const createdAt = new Date().toISOString();
 
   if (isWeb) {
     const all = getWebMessages();
-    all.push({ id, sessionId, role, content, createdAt });
+    all.push({ id, sessionId, role, content, createdAt, status });
     saveWebMessages(all);
+    const sessions = getWebSessions().map((s) =>
+      s.id === sessionId ? { ...s, updatedAt: createdAt } : s
+    );
+    saveWebSessions(sessions);
     return id;
   }
 
   await runInQueue(async (db) => {
     await db.runAsync(
-      'INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO messages (id, session_id, role, content, created_at, status) VALUES (?, ?, ?, ?, ?, ?)',
       id,
       sessionId,
       role,
       content,
-      createdAt
+      createdAt,
+      status ?? null
     );
+    // Aktivitas terakhir sesi dipakai untuk mengelompokkan riwayat.
+    await db.runAsync('UPDATE sessions SET updated_at = ? WHERE id = ?', createdAt, sessionId);
   });
 
   return id;
+};
+
+/**
+ * Menulis ulang isi + status sebuah pesan.
+ * Saat streaming, satu baris assistant dibuat berstatus 'streaming', diperbarui
+ * berkala (bukan per token), lalu difinalkan ke 'done' / 'interrupted' / 'error'.
+ */
+export const updateMessage = async (
+  messageId: string,
+  content: string,
+  status: MessageStatus
+): Promise<void> => {
+  if (isWeb) {
+    const all = getWebMessages().map((m) =>
+      m.id === messageId ? { ...m, content, status } : m
+    );
+    saveWebMessages(all);
+    return;
+  }
+
+  await runInQueue(async (db) => {
+    await db.runAsync(
+      'UPDATE messages SET content = ?, status = ? WHERE id = ?',
+      content,
+      status,
+      messageId
+    );
+  });
+};
+
+export interface HistorySearchHit {
+  sessionId: string;
+  sessionTitle: string;
+  role: string;
+  snippet: string;
+}
+
+/**
+ * Mencari potongan pesan berdasarkan isi teks. Read-only, tidak mengubah skema.
+ * Dipakai sebagai sumber data tool lokal `search_history`.
+ */
+export const searchMessages = async (
+  query: string,
+  limit = 8
+): Promise<HistorySearchHit[]> => {
+  const needle = query.trim();
+  if (!needle) return [];
+
+  if (isWeb) {
+    const titles = new Map(getWebSessions().map((s) => [s.id, s.title]));
+    return getWebMessages()
+      .filter((m) => m.content.toLowerCase().includes(needle.toLowerCase()))
+      .slice(0, limit)
+      .map((m) => ({
+        sessionId: m.sessionId ?? '',
+        sessionTitle: titles.get(m.sessionId ?? '') ?? 'Tanpa judul',
+        role: m.role,
+        snippet: m.content.slice(0, 240),
+      }));
+  }
+
+  return await runInQueue(async (db) => {
+    return await db.getAllAsync<HistorySearchHit>(
+      `SELECT m.session_id AS sessionId,
+              COALESCE(s.title, 'Tanpa judul') AS sessionTitle,
+              m.role AS role,
+              SUBSTR(m.content, 1, 240) AS snippet
+       FROM messages m
+       LEFT JOIN sessions s ON s.id = m.session_id
+       WHERE m.content LIKE ?
+       ORDER BY m.created_at DESC
+       LIMIT ?`,
+      `%${needle}%`,
+      limit
+    );
+  });
 };
 
 export const deleteSession = async (sessionId: string): Promise<void> => {
@@ -218,6 +359,35 @@ export const renameSession = async (sessionId: string, newTitle: string): Promis
   }
   await runInQueue(async (db) => {
     await db.runAsync('UPDATE sessions SET title = ? WHERE id = ?', newTitle, sessionId);
+  });
+};
+
+export const assignSessionToProject = async (
+  sessionId: string,
+  projectId: string | null
+): Promise<void> => {
+  if (isWeb) {
+    const sessions = getWebSessions().map((s) =>
+      s.id === sessionId ? { ...s, projectId } : s
+    );
+    saveWebSessions(sessions);
+    return;
+  }
+  await runInQueue(async (db) => {
+    await db.runAsync('UPDATE sessions SET project_id = ? WHERE id = ?', projectId, sessionId);
+  });
+};
+
+export const unassignSessionsFromProject = async (projectId: string): Promise<void> => {
+  if (isWeb) {
+    const sessions = getWebSessions().map((s) =>
+      s.projectId === projectId ? { ...s, projectId: null } : s
+    );
+    saveWebSessions(sessions);
+    return;
+  }
+  await runInQueue(async (db) => {
+    await db.runAsync('UPDATE sessions SET project_id = NULL WHERE project_id = ?', projectId);
   });
 };
 

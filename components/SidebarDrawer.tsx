@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   Animated,
@@ -11,16 +12,20 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getAllSessions, deleteSession } from '../services/history';
-import { ChatSession } from '../types/chat';
+import { ChatSession, Project } from '../types/chat';
 import { COLORS } from '../types/design';
+import { useSessionLibrary } from '../hooks/useSessionLibrary';
+import { ProjectsSection } from './Sidebar/ProjectsSection';
+import { HistorySection } from './Sidebar/HistorySection';
+import { ProjectEditorModal } from './Sidebar/ProjectEditorModal';
+import { ProjectActionsModal } from './Sidebar/ProjectActionsModal';
+import { MoveToProjectModal } from './Sidebar/MoveToProjectModal';
 import {
   CloseGlyph,
   PlusGlyph,
   SettingsGlyph,
   LockGlyph,
-  TrashGlyph,
-  ChatGlyph,
+  SearchGlyph,
 } from './DesignSystem';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -30,6 +35,7 @@ interface SidebarDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onNewChat: () => void;
+  onNewChatInProject: (projectId: string) => void;
   onSelectSession: (sessionId: string) => void;
   onOpenSettings: () => void;
   currentSessionId: string | null;
@@ -41,6 +47,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   isOpen,
   onClose,
   onNewChat,
+  onNewChatInProject,
   onSelectSession,
   onOpenSettings,
   currentSessionId,
@@ -49,67 +56,53 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const [animValue] = useState(() => new Animated.Value(0));
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  // Animate drawer open/close & load sessions
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isEditorVisible, setIsEditorVisible] = useState(false);
+  const [editorMode, setEditorMode] = useState<'create' | 'rename'>('create');
+  const [editorProject, setEditorProject] = useState<Project | null>(null);
+  const [actionProject, setActionProject] = useState<Project | null>(null);
+  const [moveTarget, setMoveTarget] = useState<ChatSession | null>(null);
+
+  const {
+    sessions,
+    groups,
+    projects,
+    isLoading,
+    query,
+    setQuery,
+    activeProjectId,
+    selectProject,
+    removeSession,
+    addProject,
+    editProject,
+    removeProject,
+    moveSession,
+  } = useSessionLibrary(isOpen);
+
+  const activeProject = useMemo(
+    () => projects.find((project) => project.id === activeProjectId) ?? null,
+    [projects, activeProjectId]
+  );
+
+  // Animasi buka/tutup drawer
   useEffect(() => {
     Animated.timing(animValue, {
       toValue: isOpen ? 1 : 0,
       duration: 240,
       useNativeDriver: true,
     }).start();
-
-    if (isOpen) {
-      let isMounted = true;
-      getAllSessions()
-        .then((data) => {
-          if (isMounted) {
-            setSessions(data);
-          }
-        })
-        .catch((err) => {
-          console.error('Gagal memuat riwayat di sidebar:', err);
-        });
-
-      return () => {
-        isMounted = false;
-      };
-    }
   }, [isOpen, animValue]);
 
-  const refreshHistory = async () => {
-    try {
-      const data = await getAllSessions();
-      setSessions(data);
-    } catch (err) {
-      console.error('Gagal memuat riwayat di sidebar:', err);
-    }
-  };
-
-  const handleDeleteSession = (session: ChatSession) => {
-    Alert.alert(
-      'Hapus Sesi',
-      `Hapus percakapan "${session.title}"?`,
-      [
-        { text: 'Batal', style: 'cancel' },
-        {
-          text: 'Hapus',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteSession(session.id);
-              await refreshHistory();
-              if (currentSessionId === session.id) {
-                onNewChat();
-              }
-            } catch (err) {
-              console.error('Gagal menghapus sesi:', err);
-            }
-          },
-        },
-      ],
-      { cancelable: true }
-    );
-  };
+  // Drawer bisa ditutup dari banyak jalur, jadi state sementara
+  // dibersihkan di satu handler alih-alih lewat effect.
+  const handleClose = useCallback(() => {
+    setIsSearchOpen(false);
+    setQuery('');
+    setIsEditorVisible(false);
+    setActionProject(null);
+    setMoveTarget(null);
+    onClose();
+  }, [onClose, setQuery]);
 
   const translateX = useMemo(
     () =>
@@ -129,194 +122,301 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
     [animValue]
   );
 
+  const handleSelectSession = (sessionId: string) => {
+    handleClose();
+    onSelectSession(sessionId);
+  };
+
+  const handleDeleteSession = (session: ChatSession) => {
+    Alert.alert(
+      'Hapus Sesi',
+      `Hapus percakapan "${session.title}"?`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Hapus',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeSession(session.id);
+              if (currentSessionId === session.id) {
+                onNewChat();
+              }
+            } catch (err) {
+              console.error('Gagal menghapus sesi:', err);
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  const handleDeleteProject = (project: Project) => {
+    setActionProject(null);
+    Alert.alert(
+      'Hapus Project',
+      `Hapus project "${project.name}"? Percakapan di dalamnya tetap tersimpan.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Hapus',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeProject(project.id);
+            } catch (err) {
+              console.error('Gagal menghapus project:', err);
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  const handleSubmitEditor = async (name: string) => {
+    try {
+      if (editorMode === 'rename' && editorProject) {
+        await editProject(editorProject.id, name);
+      } else {
+        await addProject(name);
+      }
+      setIsEditorVisible(false);
+    } catch (err) {
+      console.error('Gagal menyimpan project:', err);
+    }
+  };
+
+  const handleMoveSession = async (projectId: string | null) => {
+    const target = moveTarget;
+    setMoveTarget(null);
+    if (!target) return;
+    try {
+      await moveSession(target.id, projectId);
+    } catch (err) {
+      console.error('Gagal memindahkan sesi:', err);
+    }
+  };
+
   return (
-    <View
-      style={[
-        styles.overlayContainer,
-        { pointerEvents: isOpen ? 'auto' : 'none' },
-      ]}
-    >
-      {/* Dimmed backdrop */}
-      <Animated.View
+    <>
+      <View
         style={[
-          styles.backdrop,
-          {
-            opacity: backdropOpacity,
-          },
+          styles.overlayContainer,
+          { pointerEvents: isOpen ? 'auto' : 'none' },
         ]}
       >
-        <TouchableOpacity
-          style={styles.backdropTouch}
-          activeOpacity={1}
-          onPress={onClose}
-          accessibilityLabel="Tutup sidebar"
-        />
-      </Animated.View>
-
-      {/* Slide-in Drawer */}
-      <Animated.View
-        style={[
-          styles.drawer,
-          {
-            width: DRAWER_WIDTH,
-            paddingTop: Math.max(insets.top, 16) + 8,
-            paddingBottom: Math.max(insets.bottom, 16) + 12,
-            transform: [{ translateX }],
-          },
-        ]}
-      >
-        {/* Drawer Header: Avatar + Title + Close button */}
-        <View style={styles.drawerHeader}>
-          <View style={styles.headerLeft}>
-            <View style={styles.avatarOrb}>
-              <Image
-                source={require('../assets/aiku-avatar.jpg')}
-                style={styles.avatarImage}
-                resizeMode="cover"
-              />
-              <View style={styles.onlineDot} />
-            </View>
-            <View style={styles.headerTexts}>
-              <Text style={styles.appName}>Aiku</Text>
-              <Text style={styles.appSubtitle}>9Router AI Client</Text>
-            </View>
-          </View>
+        {/* Dimmed backdrop */}
+        <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
           <TouchableOpacity
-            style={styles.closeBtn}
-            onPress={onClose}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            activeOpacity={0.7}
-            accessibilityLabel="Tutup menu"
-          >
-            <CloseGlyph size={14} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
+            style={styles.backdropTouch}
+            activeOpacity={1}
+            onPress={handleClose}
+            accessibilityLabel="Tutup sidebar"
+          />
+        </Animated.View>
 
-        {/* Action: New Chat Button */}
-        <TouchableOpacity
-          style={styles.newChatBtn}
-          onPress={() => {
-            onClose();
-            onNewChat();
-          }}
-          activeOpacity={0.82}
-          accessibilityRole="button"
-          accessibilityLabel="Mulai percakapan baru"
+        {/* Slide-in Drawer */}
+        <Animated.View
+          style={[
+            styles.drawer,
+            {
+              width: DRAWER_WIDTH,
+              paddingTop: Math.max(insets.top, 16) + 8,
+              paddingBottom: Math.max(insets.bottom, 16) + 12,
+              transform: [{ translateX }],
+            },
+          ]}
         >
-          <View style={styles.newChatIconWrap}>
-            <PlusGlyph size={16} color={COLORS.onAccentYellow} />
+          {/* Drawer Header: Avatar + Title + Close button */}
+          <View style={styles.drawerHeader}>
+            <View style={styles.headerLeft}>
+              <View style={styles.avatarOrb}>
+                <Image
+                  source={require('../assets/aiku-avatar.jpg')}
+                  style={styles.avatarImage}
+                  resizeMode="cover"
+                />
+                <View style={styles.onlineDot} />
+              </View>
+              <View style={styles.headerTexts}>
+                <Text style={styles.appName}>Aiku</Text>
+                <Text style={styles.appSubtitle}>9Router AI Client</Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.closeBtn}
+              onPress={handleClose}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}
+              accessibilityLabel="Tutup menu"
+            >
+              <CloseGlyph size={14} color={COLORS.textSecondary} />
+            </TouchableOpacity>
           </View>
-          <Text style={styles.newChatText}>Chat Baru</Text>
-        </TouchableOpacity>
 
-        {/* Section: Riwayat Percakapan */}
-        <View style={styles.historySection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>RIWAYAT PERCAKAPAN</Text>
-            <Text style={styles.sessionCount}>{sessions.length}</Text>
-          </View>
+          {/* Primary Action: New Chat */}
+          <TouchableOpacity
+            style={styles.newChatBtn}
+            onPress={() => {
+              handleClose();
+              onNewChat();
+            }}
+            activeOpacity={0.82}
+            accessibilityRole="button"
+            accessibilityLabel="Mulai percakapan baru"
+          >
+            <View style={styles.newChatIconWrap}>
+              <PlusGlyph size={16} color={COLORS.onAccentYellow} />
+            </View>
+            <Text style={styles.newChatText}>Chat Baru</Text>
+          </TouchableOpacity>
 
+          {/* Search: row yang berubah jadi input saat aktif */}
+          {isSearchOpen ? (
+            <View style={styles.searchBox}>
+              <SearchGlyph size={14} color={COLORS.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Cari judul percakapan..."
+                placeholderTextColor={COLORS.textMuted}
+                autoFocus
+                autoCapitalize="none"
+                autoCorrect={false}
+                selectionColor={COLORS.accentYellow}
+                accessibilityLabel="Cari percakapan"
+              />
+              <TouchableOpacity
+                onPress={() => {
+                  setQuery('');
+                  setIsSearchOpen(false);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.65}
+                accessibilityLabel="Tutup pencarian"
+              >
+                <CloseGlyph size={12} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.searchRow}
+              onPress={() => setIsSearchOpen(true)}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel="Cari percakapan"
+            >
+              <SearchGlyph size={16} color={COLORS.textSecondary} />
+              <Text style={styles.searchRowText}>Cari percakapan</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Projects + Riwayat dalam satu area scroll */}
           <ScrollView
-            style={styles.sessionList}
-            contentContainerStyle={styles.sessionListContent}
+            style={styles.middleScroll}
+            contentContainerStyle={styles.middleContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {sessions.length === 0 ? (
-              <View style={styles.emptyHistoryBox}>
-                <Text style={styles.emptyHistoryTitle}>Belum ada riwayat</Text>
-                <Text style={styles.emptyHistorySubtitle}>
-                  Percakapan Anda akan tersimpan otomatis di sini.
-                </Text>
-              </View>
-            ) : (
-              sessions.map((session) => {
-                const isActive = session.id === currentSessionId;
-                return (
-                  <TouchableOpacity
-                    key={session.id}
-                    style={[
-                      styles.sessionItem,
-                      isActive && styles.sessionItemActive,
-                    ]}
-                    onPress={() => {
-                      onClose();
-                      onSelectSession(session.id);
-                    }}
-                    activeOpacity={0.75}
-                  >
-                    <View style={styles.sessionItemLeft}>
-                      <ChatGlyph
-                        size={15}
-                        color={isActive ? COLORS.accentYellow : COLORS.textMuted}
-                      />
-                      <Text
-                        style={[
-                          styles.sessionTitleText,
-                          isActive && styles.sessionTitleTextActive,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {session.title}
-                      </Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={styles.deleteSessionBtn}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleDeleteSession(session);
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      activeOpacity={0.65}
-                    >
-                      <TrashGlyph size={12} color={COLORS.textMuted} />
-                    </TouchableOpacity>
-                  </TouchableOpacity>
-                );
-              })
-            )}
-          </ScrollView>
-        </View>
-
-        {/* Drawer Footer: Settings & Connection Info */}
-        <View style={styles.drawerFooter}>
-          {/* Active Model Pill */}
-          <View style={styles.modelStatusPill}>
-            <View
-              style={[
-                styles.statusIndicator,
-                { backgroundColor: isConfigured ? '#10B981' : '#F59E0B' },
-              ]}
+            <ProjectsSection
+              projects={projects}
+              activeProjectId={activeProjectId}
+              onSelectProject={selectProject}
+              onCreatePress={() => {
+                setEditorMode('create');
+                setEditorProject(null);
+                setIsEditorVisible(true);
+              }}
+              onProjectMenu={setActionProject}
             />
-            <Text style={styles.modelStatusText} numberOfLines={1}>
-              {activeModel}
-            </Text>
-          </View>
 
-          {/* Settings Button */}
-          <TouchableOpacity
-            style={styles.footerItem}
-            onPress={() => {
-              onClose();
-              onOpenSettings();
-            }}
-            activeOpacity={0.75}
-          >
-            <SettingsGlyph size={18} color={COLORS.textSecondary} />
-            <Text style={styles.footerItemText}>Pengaturan 9Router</Text>
-          </TouchableOpacity>
+            <HistorySection
+              groups={groups}
+              totalCount={sessions.length}
+              activeProject={activeProject}
+              currentSessionId={currentSessionId}
+              isLoading={isLoading}
+              hasQuery={query.trim().length > 0}
+              onSelectSession={handleSelectSession}
+              onDeleteSession={handleDeleteSession}
+              onMoveSession={setMoveTarget}
+            />
+          </ScrollView>
 
-          {/* Encryption Note */}
-          <View style={styles.encryptedNote}>
-            <LockGlyph size={11} color={COLORS.textMuted} />
-            <Text style={styles.encryptedNoteText}>
-              Sesi terenkripsi & tersimpan lokal
-            </Text>
+          {/* Drawer Footer: Settings & Connection Info */}
+          <View style={styles.drawerFooter}>
+            <View style={styles.modelStatusPill}>
+              <View
+                style={[
+                  styles.statusIndicator,
+                  { backgroundColor: isConfigured ? '#10B981' : '#F59E0B' },
+                ]}
+              />
+              <Text style={styles.modelStatusText} numberOfLines={1}>
+                {activeModel}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.footerItem}
+              onPress={() => {
+                handleClose();
+                onOpenSettings();
+              }}
+              activeOpacity={0.75}
+            >
+              <SettingsGlyph size={18} color={COLORS.textSecondary} />
+              <Text style={styles.footerItemText}>Pengaturan 9Router</Text>
+            </TouchableOpacity>
+
+            <View style={styles.encryptedNote}>
+              <LockGlyph size={11} color={COLORS.textMuted} />
+              <Text style={styles.encryptedNoteText}>
+                Sesi terenkripsi & tersimpan lokal
+              </Text>
+            </View>
           </View>
-        </View>
-      </Animated.View>
-    </View>
+        </Animated.View>
+      </View>
+
+      <ProjectEditorModal
+        visible={isEditorVisible}
+        title={editorMode === 'rename' ? 'Ganti nama project' : 'Project baru'}
+        initialValue={editorProject?.name ?? ''}
+        submitLabel={editorMode === 'rename' ? 'Simpan' : 'Buat'}
+        onCancel={() => setIsEditorVisible(false)}
+        onSubmit={handleSubmitEditor}
+      />
+
+      <ProjectActionsModal
+        visible={actionProject !== null}
+        project={actionProject}
+        onClose={() => setActionProject(null)}
+        onNewChatInProject={(project) => {
+          setActionProject(null);
+          handleClose();
+          onNewChatInProject(project.id);
+        }}
+        onRename={(project) => {
+          setActionProject(null);
+          setEditorMode('rename');
+          setEditorProject(project);
+          setIsEditorVisible(true);
+        }}
+        onDelete={handleDeleteProject}
+      />
+
+      <MoveToProjectModal
+        visible={moveTarget !== null}
+        projects={projects}
+        currentProjectId={moveTarget?.projectId ?? null}
+        onClose={() => setMoveTarget(null)}
+        onSelect={handleMoveSession}
+      />
+    </>
   );
 };
 
@@ -446,98 +546,44 @@ const styles = StyleSheet.create({
     color: COLORS.onAccentYellow,
     letterSpacing: -0.2,
   },
-  historySection: {
-    flex: 1,
-    marginTop: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-    paddingHorizontal: 4,
-  },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    letterSpacing: 1.2,
-  },
-  sessionCount: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-    backgroundColor: COLORS.surfaceContainer,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 8,
-  },
-  sessionList: {
-    flex: 1,
-  },
-  sessionListContent: {
-    gap: 4,
-    paddingBottom: 16,
-  },
-  sessionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: 'transparent',
-  },
-  sessionItemActive: {
-    backgroundColor: COLORS.accentYellowContainer,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 199, 44, 0.25)',
-  },
-  sessionItemLeft: {
+  searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    flex: 1,
-    marginRight: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    marginTop: 8,
   },
-  sessionTitleText: {
+  searchRowText: {
     fontSize: 13,
+    fontWeight: '500',
     color: COLORS.textSecondary,
-    flex: 1,
   },
-  sessionTitleTextActive: {
-    color: COLORS.accentYellow,
-    fontWeight: '600',
-  },
-  deleteSessionBtn: {
-    padding: 6,
-    borderRadius: 6,
-  },
-  emptyHistoryBox: {
-    paddingVertical: 32,
+  searchBox: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  emptyHistoryTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  emptyHistorySubtitle: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-  loadingBox: {
     gap: 8,
-    paddingVertical: 12,
+    backgroundColor: COLORS.surfaceContainer,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 8,
   },
-  skeletonItem: {
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.textPrimary,
+    padding: 0,
+  },
+  middleScroll: {
+    flex: 1,
+    marginTop: 4,
+  },
+  middleContent: {
+    paddingBottom: 8,
   },
   drawerFooter: {
     paddingTop: 12,

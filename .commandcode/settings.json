@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(uv:*)",
+      "Shell(graphify:*)",
+      "Shell(git:*)",
+      "Shell(agent-browser:*)",
+      "powershell",
+      "Shell(powershell -NoProfile -Command \"$f='E:\\android-ai-chat\\aiku-app\\aiku-chat-preview.html'; (Get-Item $f).Length; $c=Get-Content $f -Raw; foreach($t in 'html','head','body','script','style','main','aside'){ $o=([regex]::Matches($c,\\\"<$t[ >]\\\")).Count; $cl=([regex]::Matches($c,\\\"</$t>\\\")).Count; \\\"$t open=$o close=$cl\\\" }\")",
+      "Shell(node -e \"const fs=require('fs');const h=fs.readFileSync('aiku-chat-preview.html','utf8');const m=h.match(/<script>([\\s\\S]*?)<\\/script>/);try{new Function(m[1]);console.log('JS syntax: OK');}catch(e){console.log('JS ERROR: '+e.message);}for(const t of ['html','head','body','aside','main','section','header','footer','textarea','script','style','div','button','span','svg']){const o=(h.match(new RegExp('<'+t+'(?=[ >])','g'))||[]).length;const c=(h.match(new RegExp('</'+t+'>','g'))||[]).length;if(o!==c)console.log('UNBALANCED '+t+' open='+o+' close='+c);}console.log('bytes='+h.length);\")",
+      "Shell(node -e \"const fs=require('fs');const h=fs.readFileSync('aiku-chat-preview.html','utf8');const m=h.match(/<script>([\\s\\S]*?)<\\/script>/);try{new Function(m[1]);console.log('JS syntax: OK');}catch(e){console.log('JS ERROR: '+e.message);}for(const t of ['html','head','body','aside','main','section','header','footer','textarea','script','style','div','button','span','svg']){const o=(h.match(new RegExp('<'+t+'(?=[ >])','g'))||[]).length;const c=(h.match(new RegExp('</'+t+'>','g'))||[]).length;if(o!==c)console.log('UNBALANCED '+t+' open='+o+' close='+c);}console.log('hidden rule: '+/\\[hidden\\]\\{display:none!important\\}/.test(h));console.log('stage-wrap column: '+/flex-direction:column/.test(h.slice(h.indexOf('.stage-wrap'), h.indexOf('.stage-wrap')+220)));\")",
+      "Shell(npx tsc --noEmit)",
+      "Shell(npx expo lint)",
+      "Shell(npx expo export --platform android --output-dir dist-check 2 >& 1)",
+      "Shell(npx expo export --platform android --output-dir dist-check)",
+      "Shell(rmdir:*)",
+      "Shell(python \"C:\\Users\\praze\\AppData\\Local\\Temp\\commandcode\\E--android-ai-chat-aiku-app\\95b28987-9b26-4bb1-9dc2-a2d8368492ef\\scratchpad\\test_migration.py\")",
+      "Shell(python \"C:\\Users\\praze\\AppData\\Local\\Temp\\commandcode\\E--android-ai-chat-aiku-app\\95b28987-9b26-4bb1-9dc2-a2d8368492ef\\scratchpad\\analyze_bg.py\" \"C:\\Users\\praze\\AppData\\Local\\Temp\\commandcode\\E--android-ai-chat-aiku-app\\95b28987-9b26-4bb1-9dc2-a2d8368492ef\\scratchpad\\aiku-logo.png\")",
+      "Shell(python \"C:\\Users\\praze\\AppData\\Local\\Temp\\commandcode\\E--android-ai-chat-aiku-app\\95b28987-9b26-4bb1-9dc2-a2d8368492ef\\scratchpad\\verify_splash.py\" \"E:\\android-ai-chat\\aiku-app\\assets\\splash-icon.png\")",
+      "Shell(python -c \"import numpy as np;from PIL import Image;a=np.array(Image.open(r'E:\\android-ai-chat\\aiku-app\\assets\\splash-icon.png').convert('RGBA'));al=a[:,:,3];rows=al.max(axis=1);bands=[];inb=False;s=0 for y in range(len(rows)): if rows[y]>8 and not inb: inb=True; s=y elif rows[y]<=8 and inb: inb=False; bands.append((s,y-1,y-s)) if inb: bands.append((s,len(rows)-1,len(rows)-s)) print('jumlah band alpha:',len(bands));[print(' y',b[0],'-',b[1],' tinggi',b[2]) for b in bands]\")",
+      "Shell(python \"C:\\Users\\praze\\AppData\\Local\\Temp\\commandcode\\E--android-ai-chat-aiku-app\\95b28987-9b26-4bb1-9dc2-a2d8368492ef\\scratchpad\\verify_shape.py\" \"E:\\android-ai-chat\\aiku-app\\assets\\splash-icon.png\")",
+      "Shell(node \"C:\\Users\\praze\\AppData\\Local\\Temp\\commandcode\\E--android-ai-chat-aiku-app\\95b28987-9b26-4bb1-9dc2-a2d8368492ef\\scratchpad\\test_stream_parser.mjs\")",
+      "Shell(node --input-type=module -e \"const p = await import('file:///E:/android-ai-chat/aiku-app/services/streamParser.ts'); const acc = p.createStreamAccumulator(); console.log('keys:', Object.keys(acc)); console.log('done:', acc.done, typeof acc.done); const r = p.applySseLine(acc, 'data: [DONE]'); console.log('return:', r); console.log('done after:', acc.done, typeof acc.done); console.log('keys after:', Object.keys(acc));\")",
+      "Shell(npm:*)",
+      "Shell(npx --yes eas-cli --version 2 >& 1)",
+      "Shell(Select-Object:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

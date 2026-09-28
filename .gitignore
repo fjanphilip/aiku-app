@@ -45,3 +45,6 @@ yarn-error.*
 .claude/
 skills-lock.json
 stitch-assets/
+
+# generated knowledge graph output (graphify)
+graphify-out/

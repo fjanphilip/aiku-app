@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { COLORS } from '../types/design';
+import { useReduceMotion } from '../hooks/useReduceMotion';
 
 interface TypingIndicatorProps {
   label?: string;
@@ -13,11 +14,15 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
   dotSize = 6,
   dotColor = COLORS.accentYellow,
 }) => {
+  const reduceMotion = useReduceMotion();
   const [dot1] = useState(() => new Animated.Value(0));
   const [dot2] = useState(() => new Animated.Value(0));
   const [dot3] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
+    // Hormati preferensi reduce motion: titik tetap statis.
+    if (reduceMotion) return;
+
     const createAnimation = (anim: Animated.Value, delay: number) => {
       return Animated.sequence([
         Animated.delay(delay),
@@ -52,7 +57,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
       animLoop2.stop();
       animLoop3.stop();
     };
-  }, [dot1, dot2, dot3]);
+  }, [dot1, dot2, dot3, reduceMotion]);
 
   const renderDot = (anim: Animated.Value) => {
     const translateY = anim.interpolate({
@@ -68,6 +73,10 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
       outputRange: [0.85, 1.2],
     });
 
+    const motionStyle = reduceMotion
+      ? { opacity: 0.7 }
+      : { transform: [{ translateY }, { scale }], opacity };
+
     return (
       <Animated.View
         style={[
@@ -77,9 +86,8 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
             height: dotSize,
             borderRadius: dotSize / 2,
             backgroundColor: dotColor,
-            transform: [{ translateY }, { scale }],
-            opacity,
           },
+          motionStyle,
         ]}
       />
     );

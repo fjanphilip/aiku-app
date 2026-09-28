@@ -723,6 +723,140 @@ export const CheckGlyph = ({ size = 16, color = '#10B981', style }: GlyphProps) 
   </GlyphWrap>
 );
 
+// ── Search (Sidebar search action) ───────────────────────────────
+export const SearchGlyph = ({ size = 18, color = '#9E9EA7', style }: GlyphProps) => (
+  <GlyphWrap size={size} color={color} style={style}>
+    {({ color: c, stroke }) => {
+      const thickness = Math.max(1.6, stroke);
+      return (
+        <>
+          <View
+            style={{
+              position: 'absolute',
+              top: '10%',
+              left: '8%',
+              width: '58%',
+              height: '58%',
+              borderRadius: 999,
+              borderWidth: thickness,
+              borderColor: c,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              bottom: '16%',
+              right: '12%',
+              width: '34%',
+              height: thickness,
+              backgroundColor: c,
+              borderRadius: 1,
+              transform: [{ rotate: '45deg' }],
+            }}
+          />
+        </>
+      );
+    }}
+  </GlyphWrap>
+);
+
+// ── Folder (Projects section) ────────────────────────────────────
+export const FolderGlyph = ({ size = 18, color = '#9E9EA7', style }: GlyphProps) => (
+  <GlyphWrap size={size} color={color} style={style}>
+    {({ color: c, stroke }) => {
+      const thickness = Math.max(1.4, stroke);
+      return (
+        <>
+          {/* Folder tab */}
+          <View
+            style={{
+              position: 'absolute',
+              top: '10%',
+              left: '12%',
+              width: '34%',
+              height: '14%',
+              borderTopLeftRadius: 3,
+              borderTopRightRadius: 3,
+              borderWidth: thickness,
+              borderColor: c,
+              borderBottomWidth: 0,
+            }}
+          />
+          {/* Folder body */}
+          <View
+            style={{
+              position: 'absolute',
+              top: '22%',
+              left: '10%',
+              width: '80%',
+              height: '60%',
+              borderRadius: 3,
+              borderWidth: thickness,
+              borderColor: c,
+            }}
+          />
+        </>
+      );
+    }}
+  </GlyphWrap>
+);
+
+// ── Chevron Down (Model picker trigger) ──────────────────────────
+export const ChevronDownGlyph = ({ size = 16, color = '#9E9EA7', style }: GlyphProps) => (
+  <GlyphWrap size={size} color={color} style={style}>
+    {({ color: c, stroke }) => {
+      const thickness = Math.max(1.7, stroke);
+      return (
+        <>
+          <View
+            style={{
+              position: 'absolute',
+              top: '42%',
+              left: '20%',
+              width: '38%',
+              height: thickness,
+              backgroundColor: c,
+              borderRadius: 1,
+              transform: [{ rotate: '45deg' }],
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              top: '42%',
+              right: '20%',
+              width: '38%',
+              height: thickness,
+              backgroundColor: c,
+              borderRadius: 1,
+              transform: [{ rotate: '-45deg' }],
+            }}
+          />
+        </>
+      );
+    }}
+  </GlyphWrap>
+);
+
+// ── More / horizontal ellipsis (Project row actions) ─────────────
+export const MoreGlyph = ({ size = 18, color = '#9E9EA7', style }: GlyphProps) => (
+  <GlyphWrap size={size} color={color} style={style}>
+    {({ color: c, stroke }) => {
+      const dot = Math.max(2.4, stroke * 1.4);
+      return (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: dot * 1.2 }}>
+          {[0, 1, 2].map((index) => (
+            <View
+              key={index}
+              style={{ width: dot, height: dot, borderRadius: 999, backgroundColor: c }}
+            />
+          ))}
+        </View>
+      );
+    }}
+  </GlyphWrap>
+);
+
 const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',

@@ -6,9 +6,7 @@ import {
   StyleSheet,
   Alert,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
-  StatusBar as RNStatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -143,11 +141,7 @@ export default function SettingsScreen() {
   return (
     <Screen>
       <GradientMeshBackground />
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 0) : 0}
-      >
+      <KeyboardAvoidingView style={styles.flex} behavior='padding'>
         <ScrollView
           style={styles.flex}
           contentContainerStyle={styles.scrollContent}

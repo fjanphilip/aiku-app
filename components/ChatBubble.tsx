@@ -122,9 +122,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   userBubble: {
-    backgroundColor: '#28272b',
+    backgroundColor: COLORS.accentYellow,
     borderWidth: 1,
-    borderColor: '#38373f',
+    borderColor: COLORS.primarySoft,
     borderBottomRightRadius: 4,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
@@ -144,7 +144,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   userText: {
-    color: '#F4F4F6',
+    color: COLORS.onAccentYellow,
     fontSize: 15,
     lineHeight: 22,
     letterSpacing: -0.1,
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   userTime: {
-    color: 'rgba(244, 244, 246, 0.55)',
+    color: 'rgba(26, 20, 0, 0.6)',
   },
   assistantTime: {
     color: COLORS.textMuted,
