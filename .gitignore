@@ -48,3 +48,10 @@ stitch-assets/
 
 # generated knowledge graph output (graphify)
 graphify-out/
+
+# dokumen internal & tooling agent — tidak perlu ikut ke repo
+/PRD.md
+/PROMPT.md
+/AGENTS.md
+/CLAUDE.md
+.commandcode/

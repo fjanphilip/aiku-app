@@ -11,4 +11,5 @@
 - Keeps AI features mobile-only: the app calls the provider (e.g. OpenRouter) directly using a user-supplied BYOK API key stored on-device, instead of routing requests through a backend/proxy layer. Confidence: 0.55
 - Prefers minimal changes to existing working features and schema: leave already-working parts (BYOK flow, model picker, SQLite schema) untouched unless the change is strictly necessary. Confidence: 0.55
 - Wants generated/tool-output directories (e.g. `graphify-out/`, `.agents/`, local tool assets) kept out of version control and build uploads via `.gitignore`. Confidence: 0.45
+- When publishing to GitHub, wants internal planning and agent-collaboration docs (PRD.md, PROMPT.md, AGENTS.md, CLAUDE.md, `.commandcode/`) excluded from the repo, with root-anchored `.gitignore` entries and files untracked from the git index — not just ignored. Product-facing docs (README.md, design mockup) stay in. Confidence: 0.55
 - Expects side housekeeping to be bundled into the same pass as the main task ("jalankan sekalian …") instead of being deferred to a separate round. Confidence: 0.4
