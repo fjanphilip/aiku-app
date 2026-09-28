@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/readme-logo.png" alt="Ikon aplikasi Aiku" width="160" />
+</p>
+
 # Aiku
 
 Aplikasi chat AI mobile untuk Android & iOS. Client ringan berbasis **Expo + React Native**
